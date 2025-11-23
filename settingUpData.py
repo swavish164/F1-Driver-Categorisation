@@ -47,14 +47,40 @@ lapNumbers = sorted(fullLaps["LapNumber"].unique())
 lapMatrix = pd.DataFrame(index=lapNumbers, columns=columns)
 lapMatrix = lapMatrix.astype(object)
 
-lapRow = fullLaps.iloc[0]
-lapTelemetry = lapRow.get_telemetry()
+
+def calculatingData(currentLapData):
+    totalData = currentLapData.shape[0]
+    throttle = currentLapData['Throttle']
+    gears = currentLapData['nGear']
+    diffs = gears.diff()
+    upshifts = (diffs > 0).sum()
+    downshifts = (diffs < 0).sum()
+    gearMean = int(gears.mean())
+    gearsCount = gears.value_counts()
+    gearPerc = (gearsCount / gearsCount.sum()) * 100
+    throttleSD = throttle.std()
+    throttleMean = throttle.mean()
+    throttleVC = throttle.value_counts()
+    braking = currentLapData['Brake'].value_counts()
+    totalThrottle = throttleVC.get(100, 0)
+    totalThrottle0 = throttleVC.get(0, 0)
+    totalBraking = braking.get(True)
+    print("Braking: "+str((totalBraking/totalData)*100))
+    return ((totalThrottle / totalData) * 100)
+
 
 for driver, laps in driversLaps:
-    for i in range(laps.shape[0]):
+    laps = laps.drop(['SpeedI1', 'SpeedI2', 'SpeedFL', 'SpeedST',
+                      'Sector1SessionTime', 'Sector2SessionTime', 'Sector3SessionTime'],
+                     axis=1, errors='ignore')
+    for i in range(1):
         lapRow = laps.iloc[i]
         lapNumber = lapRow["LapNumber"]
         lapTelemetry = lapRow.get_telemetry()
+        lapTelemetry = lapTelemetry.drop(
+            ['Status', 'X', 'Y', 'Z'], axis=1, errors='ignore')
+        throttle = calculatingData(lapTelemetry)
+        print("Throttle: "+str(throttle))
         minDistanceToDriverAhead = lapTelemetry["DistanceToDriverAhead"].min()
         driversAhead = set(lapTelemetry["DriverAhead"].dropna().unique())
         attacking = minDistanceToDriverAhead < 1
@@ -74,9 +100,10 @@ for lapNumber in lapMatrix.index:
                 continue
             driversAhead = lapMatrix.loc[lapNumber,
                                          (attacker, "Drivers Ahead")]
-            if not pd.isna(driversAhead) and defender in driversAhead:
+            driverNumber = session.get_driver(defender)['DriverNumber']
+            if not pd.isna(driversAhead) and driverNumber in driversAhead:
                 defending = True
                 break
         lapMatrix.loc[lapNumber, (defender, "defending")] = defending
 
-lapMatrix.to_pickle("lapMatrix.pkl")
+# lapMatrix.to_pickle("2025Silverstone.pkl")
