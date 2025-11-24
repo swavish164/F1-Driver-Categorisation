@@ -1,6 +1,8 @@
 import loadSession
 import pandas as pd
 import fastf1
+import numpy as np
+
 
 fastf1.set_log_level("ERROR")
 
@@ -47,6 +49,38 @@ lapNumbers = sorted(fullLaps["LapNumber"].unique())
 lapMatrix = pd.DataFrame(index=lapNumbers, columns=columns)
 lapMatrix = lapMatrix.astype(object)
 
+circuitInfo = session.get_circuit_info().corners
+
+
+def identifyCorner(currentLapData):
+    cornerPoints = pd.DataFrame({
+        "X": circuitInfo['X'].values,
+        "Y": circuitInfo['Y'].values,
+        "CornerMarker": True
+    })
+    lap = currentLapData.copy()
+    lap["CornerMarker"] = False
+    lap["Corner"] = False
+    combined = pd.concat([lap, cornerPoints], ignore_index=True)
+    combined = combined.sort_values("X").reset_index(drop=True)
+    cornerIndices = combined.index[combined["CornerMarker"]].tolist()
+    real_corner_indices = []
+    for index in cornerIndices:
+        prev = index - 1
+        next = i + index
+        if prev >= 0 and not combined.loc[prev, "CornerMarker"]:
+            marker = combined.loc[index]
+            previousPoint = marker - combined.loc[prev]
+            nextPoint = marker - combined.loc[next]
+            if previousPoint <= nextPoint:
+                real_corner_indices.append(prev)
+            else:
+                real_corner_indices.append(next)
+    combined.loc[real_corner_indices, "Corner"] = True
+    lapWithCorners = combined[combined["CornerMarker"] == False].copy()
+    lapWithCorners = lapWithCorners.drop(columns=["CornerMarker"])
+    return lapWithCorners
+
 
 def calculatingData(currentLapData):
     totalData = currentLapData.shape[0]
@@ -65,7 +99,8 @@ def calculatingData(currentLapData):
     totalThrottle = throttleVC.get(100, 0)
     totalThrottle0 = throttleVC.get(0, 0)
     totalBraking = braking.get(True)
-    print("Braking: "+str((totalBraking/totalData)*100))
+    throttlePerc = (totalThrottle / totalData) * 100
+    brakingPerc = (totalBraking/totalData)*100
     return ((totalThrottle / totalData) * 100)
 
 
@@ -78,9 +113,9 @@ for driver, laps in driversLaps:
         lapNumber = lapRow["LapNumber"]
         lapTelemetry = lapRow.get_telemetry()
         lapTelemetry = lapTelemetry.drop(
-            ['Status', 'X', 'Y', 'Z'], axis=1, errors='ignore')
+            ['Status', 'Z'], axis=1, errors='ignore')
+        lapTelemetry = identifyCorner(lapTelemetry)
         throttle = calculatingData(lapTelemetry)
-        print("Throttle: "+str(throttle))
         minDistanceToDriverAhead = lapTelemetry["DistanceToDriverAhead"].min()
         driversAhead = set(lapTelemetry["DriverAhead"].dropna().unique())
         attacking = minDistanceToDriverAhead < 1
