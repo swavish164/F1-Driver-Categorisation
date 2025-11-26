@@ -2,6 +2,7 @@ import loadSession
 import pandas as pd
 import fastf1
 import numpy as np
+import math
 
 
 fastf1.set_log_level("ERROR")
@@ -56,15 +57,18 @@ def identifyCorner(currentLapData):
     cornerPoints = pd.DataFrame({
         "X": circuitInfo['X'].values,
         "Y": circuitInfo['Y'].values,
-        "CornerMarker": True
+        "CornerMarker": True,
+        "Apex": False
     })
     lap = currentLapData.copy()
     lap["CornerMarker"] = False
+    lap["Apex"] = False
     lap["Corner"] = False
     combined = pd.concat([lap, cornerPoints], ignore_index=True)
     combined = combined.sort_values("X").reset_index(drop=True)
     cornerIndices = combined.index[combined["CornerMarker"]].tolist()
-    real_corner_indices = []
+    cornerDataIndices = []
+    apexIndices = []
     for index in cornerIndices:
         prev = index - 1
         next = i + index
@@ -73,13 +77,41 @@ def identifyCorner(currentLapData):
             previousPoint = marker - combined.loc[prev]
             nextPoint = marker - combined.loc[next]
             if previousPoint <= nextPoint:
-                real_corner_indices.append(prev)
+                cornerDataIndices.append(prev)
             else:
-                real_corner_indices.append(next)
-    combined.loc[real_corner_indices, "Corner"] = True
+                cornerDataIndices.append(next)
+            currentSpeed = combined.loc[prev, "Speed"]
+            nextSpeed = combined.loc[next, "Speed"]
+            while (currentSpeed > nextSpeed):
+                currentSpeed = combined.loc[prev, "Speed"]
+                nextSpeed = combined.loc[next, "Speed"]
+                prev += 1
+                next += 1
+            combined.loc[next, "Apex"] = True
+    combined.loc[cornerDataIndices, "Corner"] = True
+    combined.loc[apexIndices, "Apex"] = True
     lapWithCorners = combined[combined["CornerMarker"] == False].copy()
     lapWithCorners = lapWithCorners.drop(columns=["CornerMarker"])
     return lapWithCorners
+
+
+def calculateCornerData(currentLapData):
+    cornerIndex = currentLapData.index[currentLapData['Corner'] == True].tolist(
+    )
+    apexIndex = currentLapData.index[currentLapData['Apex'] == True].tolist()
+    distanceToCornerBraking = []
+    speedCornerDiff = []
+    throttleAtApex = []
+    for i in range(len(cornerIndex)):
+        index = cornerIndex[i]
+        current = index
+        while (currentLapData.loc[current, "Brake"] == True):
+            current -= 1
+        distanceToCornerBraking.append(math.sqrt((currentLapData.loc[index, "X"] - currentLapData.loc[current, "Y"]) ^ 2 + (
+            currentLapData.loc[index, "Y"] - currentLapData.loc[current, "Y"]) ^ 2))
+        speedCornerDiff.append(
+            currentLapData.loc[index, "Speed"] - currentLapData.loc[apexIndex[i], "Speed"])
+        throttleAtApex.append(currentLapData.loc[apexIndex[i], "Throttle"])
 
 
 def calculatingData(currentLapData):
@@ -101,6 +133,7 @@ def calculatingData(currentLapData):
     totalBraking = braking.get(True)
     throttlePerc = (totalThrottle / totalData) * 100
     brakingPerc = (totalBraking/totalData)*100
+
     return ((totalThrottle / totalData) * 100)
 
 
