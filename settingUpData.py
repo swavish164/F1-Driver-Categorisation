@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import loadSession
 import pandas as pd
 import fastf1
@@ -53,12 +54,30 @@ lapMatrix = lapMatrix.astype(object)
 circuitInfo = session.get_circuit_info().corners
 
 
+def calculateCornerEntry(lapData, apexIndex, threshold=5):
+    entry = apexIndex
+    while entry > 1:
+        x1, y1 = lapData.loc[entry - 2, ['X', 'Y']]
+        x2, y2 = lapData.loc[entry - 1, ['X', 'Y']]
+        x3, y3 = lapData.loc[entry, ['X', 'Y']]
+        v1 = np.array([x2 - x1, y2 - y1])
+        v2 = np.array([x3 - x2, y3 - y2])
+        normV1 = (abs(v1[0])**2 + abs(v1[1])**2)**0.5
+        normV2 = (abs(v2[0])**2 + abs(v2[1])**2)**0.5
+        cos_theta = np.dot(v1, v2) / (normV1 * normV2 + 1e-8)
+        angle = np.arccos(np.clip(cos_theta, -1, 1)) * 180 / np.pi
+        if angle > threshold:
+            break
+        entry -= 1
+    return entry
+
+
 def identifyCorner(currentLapData):
     cornerPoints = pd.DataFrame({
         "X": circuitInfo['X'].values,
         "Y": circuitInfo['Y'].values,
         "CornerMarker": True,
-        "Apex": False
+        "Apex": True
     })
     lap = currentLapData.copy()
     lap["CornerMarker"] = False
@@ -66,32 +85,28 @@ def identifyCorner(currentLapData):
     lap["Corner"] = False
     combined = pd.concat([lap, cornerPoints], ignore_index=True)
     combined = combined.sort_values("X").reset_index(drop=True)
-    cornerIndices = combined.index[combined["CornerMarker"]].tolist()
+    apexIndices = combined.index[combined["Apex"] == True].tolist()
     cornerDataIndices = []
-    apexIndices = []
-    for index in cornerIndices:
+    for index in apexIndices:
         prev = index - 1
-        next = i + index
+        next = 1 + index
         if prev >= 0 and not combined.loc[prev, "CornerMarker"]:
-            marker = combined.loc[index]
-            previousPoint = marker - combined.loc[prev]
-            nextPoint = marker - combined.loc[next]
+            marker = combined.loc[index]['X']
+            previousPoint = marker - combined.loc[prev]['X']
+            nextPoint = marker - combined.loc[next]['X']
             if previousPoint <= nextPoint:
-                cornerDataIndices.append(prev)
+                apexIndices.append(prev)
             else:
-                cornerDataIndices.append(next)
-            currentSpeed = combined.loc[prev, "Speed"]
-            nextSpeed = combined.loc[next, "Speed"]
-            while (currentSpeed > nextSpeed):
-                currentSpeed = combined.loc[prev, "Speed"]
-                nextSpeed = combined.loc[next, "Speed"]
-                prev += 1
-                next += 1
+                apexIndices.append(next)
+            cornerDataIndices.append(
+                calculateCornerEntry(combined, index))
+
             combined.loc[next, "Apex"] = True
     combined.loc[cornerDataIndices, "Corner"] = True
     combined.loc[apexIndices, "Apex"] = True
     lapWithCorners = combined[combined["CornerMarker"] == False].copy()
     lapWithCorners = lapWithCorners.drop(columns=["CornerMarker"])
+    lapWithCorners = lapWithCorners.reset_index(drop=True)
     return lapWithCorners
 
 
@@ -99,19 +114,36 @@ def calculateCornerData(currentLapData):
     cornerIndex = currentLapData.index[currentLapData['Corner'] == True].tolist(
     )
     apexIndex = currentLapData.index[currentLapData['Apex'] == True].tolist()
+    print(cornerIndex, apexIndex)
     distanceToCornerBraking = []
     speedCornerDiff = []
     throttleAtApex = []
-    for i in range(len(cornerIndex)):
+    numberOfCorners = len(cornerIndex)
+    for i in range(numberOfCorners):
         index = cornerIndex[i]
-        current = index
-        while (currentLapData.loc[current, "Brake"] == True):
-            current -= 1
-        distanceToCornerBraking.append(math.sqrt((currentLapData.loc[index, "X"] - currentLapData.loc[current, "Y"]) ^ 2 + (
-            currentLapData.loc[index, "Y"] - currentLapData.loc[current, "Y"]) ^ 2))
+        entry = index
+        while entry > 0 and currentLapData.loc[entry, "Speed"] >= currentLapData.loc[entry - 1, "Speed"]:
+            entry -= 1
+        # print("Index: "+str(index) + " Entry: "+str(entry))
+        dx = currentLapData.loc[index, "X"] - currentLapData.loc[entry, "X"]
+        dy = currentLapData.loc[index, "Y"] - currentLapData.loc[entry, "Y"]
+        dist = math.sqrt(dx*dx + dy*dy)
+        distanceToCornerBraking.append(dist)
         speedCornerDiff.append(
-            currentLapData.loc[index, "Speed"] - currentLapData.loc[apexIndex[i], "Speed"])
+            currentLapData.loc[entry, "Speed"] -
+            currentLapData.loc[apexIndex[i], "Speed"]
+        )
         throttleAtApex.append(currentLapData.loc[apexIndex[i], "Throttle"])
+
+    if len(distanceToCornerBraking) == 0:
+        return None, None, None
+    averageDistance = round(sum(distanceToCornerBraking) / numberOfCorners, 2)
+    averageSpeedCornerDiff = round(sum(speedCornerDiff) / numberOfCorners, 2)
+    averageThrottleAtApex = round(sum(throttleAtApex) / numberOfCorners, 2)
+    print("Average distance: "+str(averageDistance))
+    print("Average speed dif: "+str(averageSpeedCornerDiff))
+    print("Average apex throttle: "+str(averageThrottleAtApex)+"\n")
+    return averageDistance, averageSpeedCornerDiff, averageThrottleAtApex
 
 
 def calculatingData(currentLapData):
@@ -133,6 +165,8 @@ def calculatingData(currentLapData):
     totalBraking = braking.get(True)
     throttlePerc = (totalThrottle / totalData) * 100
     brakingPerc = (totalBraking/totalData)*100
+    avCornerDistance, avSpeedCornerDiff, avApexThrottle = calculateCornerData(
+        currentLapData)
 
     return ((totalThrottle / totalData) * 100)
 
@@ -147,6 +181,7 @@ for driver, laps in driversLaps:
         lapTelemetry = lapRow.get_telemetry()
         lapTelemetry = lapTelemetry.drop(
             ['Status', 'Z'], axis=1, errors='ignore')
+        lapTelemetry = lapTelemetry.reset_index(drop=True)
         lapTelemetry = identifyCorner(lapTelemetry)
         throttle = calculatingData(lapTelemetry)
         minDistanceToDriverAhead = lapTelemetry["DistanceToDriverAhead"].min()
