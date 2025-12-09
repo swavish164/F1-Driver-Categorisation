@@ -5,7 +5,6 @@ import fastf1
 import numpy as np
 import math
 
-
 fastf1.set_log_level("ERROR")
 
 session = loadSession.session
@@ -45,8 +44,8 @@ fullGreenLaps = fullLaps[(fullLaps['SC'] == False) &
 driversLaps = fullGreenLaps.groupby("Driver")
 
 drivers = fullLaps["Driver"].unique()
-# metrics = ["attacking", "defending", "Drivers Ahead", "Lap Data"]
-metrics = ["attacking", "Lap Data"]
+metrics = ["attacking", "defending", "Drivers Ahead", "Lap Data"]
+# metrics = ["attacking", "Lap Data"]
 columns = pd.MultiIndex.from_product([drivers, metrics])
 lapNumbers = sorted(fullLaps["LapNumber"].unique())
 lapMatrix = pd.DataFrame(index=lapNumbers, columns=columns)
@@ -174,7 +173,7 @@ def calculatingData(currentLapData):
         # "gearMean": gearMean,
         # "gearPerc": gearPerc,
         # "throttleMean": throttleMean,
-        "throttleStd": throttleSD,
+        # "throttleStd": throttleSD,
         "throttlePerc100": throttlePerc,
         "throttlePerc0": throttle0Perc,
         "avCornerBrakeDistance": avCornerDistance,
@@ -204,13 +203,14 @@ for driver, laps in driversLaps:
         data = calculatingData(lapTelemetry)
         defendingDrivers = set((lapTelemetry[lapTelemetry['DistanceToDriverAhead'] < 1])[
                                "DriverAhead"].dropna().unique())
+        defendingDrivers = [item for item in defendingDrivers]
         if len(defendingDrivers) != 0:
             lapMatrix.loc[lapNumber, (driver, "attacking")] = True
-        # lapMatrix.loc[lapNumber, (driver, "defending")] = False
-        # lapMatrix.loc[lapNumber, (driver, "Drivers Ahead")] = driversAhead
+        lapMatrix.loc[lapNumber, (driver, "defending")] = False
+        lapMatrix.loc[lapNumber, (driver, "Drivers Ahead")] = defendingDrivers
         lapMatrix.at[lapNumber, (driver, "Lap Data")] = data
 
-'''
+
 for lapNumber in lapMatrix.index:
     for defender in drivers:
         defending = False
@@ -218,12 +218,23 @@ for lapNumber in lapMatrix.index:
             lapData = lapMatrix.loc[lapNumber, (attacker, "Lap Data")]
             if lapData is None:
                 continue
-            driversAhead = lapMatrix.loc[lapNumber,
-                                         (attacker, "Drivers Ahead")]
+            data = lapMatrix.loc[lapNumber,
+                                 (attacker, "Drivers Ahead")]
             driverNumber = session.get_driver(defender)['DriverNumber']
-            if not pd.isna(driversAhead) and driverNumber in driversAhead:
+
+            if data is None or (isinstance(data, float) and math.isnan(data)):
+                driversAhead = []
+            elif isinstance(data, list):
+                driversAhead = data
+            elif isinstance(data, (np.ndarray, pd.Series)):
+                driversAhead = list(data)
+
+            if driverNumber in driversAhead:
                 defending = True
                 break
-        # lapMatrix.loc[lapNumber, (defender, "defending")] = defending
-'''
-lapMatrix.to_pickle("2025Silverstone2.pkl")
+        lapMatrix.loc[lapNumber, (defender, "defending")] = defending
+
+attackingLaps = lapMatrix.xs("attacking", level=1, axis=1).any(axis=1)
+defendingLaps = lapMatrix.xs("defending", level=1, axis=1).any(axis=1)
+clearLaps = lapMatrix[~attackingLaps & ~defendingLaps]
+clearLaps.to_pickle("2025Silverstone2.pkl")
