@@ -51,6 +51,7 @@ def calculatingData(currentLapData, lapId, cursor,session):
             coastingPerc
         )
     )
+    print("Added lap data for lap: ",lapId)
 
     result = {
         "throttlePerc100": throttlePerc,

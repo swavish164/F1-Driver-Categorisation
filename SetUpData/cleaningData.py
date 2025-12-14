@@ -43,7 +43,7 @@ def cleaningData(session):
     columns = pd.MultiIndex.from_product([drivers, metrics])
     lapNumbers = sorted(fullLaps["LapNumber"].unique())
 
-    lapMatrix = pd.DataFrame(index=lapNumbers, columns=columns)
+    lapMatrix = pd.DataFrame(index=lapNumbers, columns=columns,dtype=object)
     lapMatrix = lapMatrix.astype(object)
 
     return {

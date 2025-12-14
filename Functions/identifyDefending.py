@@ -6,30 +6,26 @@ import pandas as pd
 def identifyIfDefending(lapMatrix, drivers, session, cursor, database):
     for lapNumber in lapMatrix.index:
         for defender in drivers:
+            driverNumber = session.get_driver(defender)['DriverNumber']
             for attacker in drivers:
-                lapData = lapMatrix.loc[lapNumber, (attacker, "Lap Data")]
-
+                lapData = lapMatrix.at[lapNumber, (attacker, "Lap Data")]
                 if lapData is None:
                     continue
-
-                driversAheadData = lapMatrix.loc[lapNumber, (attacker, "Drivers Ahead")]
-                driverNumber = session.get_driver(defender)['DriverNumber']
-                
-
-                if driversAheadData is None or (isinstance(driversAheadData, float) and math.isnan(driversAheadData)):
-                    driversAhead = []
-                elif isinstance(driversAheadData, list):
+                driversAheadData = lapMatrix.at[lapNumber, (attacker, "Drivers Ahead")]
+                if isinstance(driversAheadData, list):
                     driversAhead = driversAheadData
                 elif isinstance(driversAheadData, (np.ndarray, pd.Series)):
                     driversAhead = list(driversAheadData)
+                else:
+                    driversAhead = []
 
                 if driverNumber in driversAhead:
-                    driverId = lapMatrix.loc[lapNumber, (attacker,"driverId")]
-                    lapId = lapMatrix.loc[lapNumber, (attacker,"lapId")]
+                    driverId = lapMatrix.at[lapNumber, (defender, "driverId")]
+                    lapId = lapMatrix.at[lapNumber, (defender, "lapId")]
 
                     cursor.execute(
-                        """UPDATE LAP SET defending=? WHERE driverId=? AND raceId =?""",
-                        (1,driverId, lapId)
+                        """UPDATE LAP SET defending=? WHERE driverId=? AND lapId=?""",
+                        (1, driverId, lapId)
                     )
                     database.commit()
 
