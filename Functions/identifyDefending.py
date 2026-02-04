@@ -27,8 +27,6 @@ def identifyIfDefending(lapMatrix, drivers, session, cursor, database):
                         """UPDATE LAP SET defending=? WHERE driverId=? AND lapId=?""",
                         (1, driverId, lapId)
                     )
-                    database.commit()
-
 
 def getDefendingDrivers(lapTelemetry):
     defendingDrivers = set(
@@ -37,5 +35,4 @@ def getDefendingDrivers(lapTelemetry):
         .dropna()
         .unique()
     )
-    defending = [item for item in defendingDrivers]
-    return defending
+    return list(defendingDrivers)

@@ -40,20 +40,22 @@ def calculatingData(currentLapData, lapId, cursor,session):
     )
 
     cursor.execute(
-        """INSERT INTO FEATURES (lapId, throttlePerc100, throttlePerc0, avCornerBrakeDistance, throttleOscillation, coastingPerc)
-    VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO FEATURES (lapId, throttlePerc100, throttlePerc0, avCornerBrakeDistance, throttleOscillation, coastingPerc, brakeChanges, avSpeedCornerDiff, avApexThrottle)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             lapId,
             throttlePerc,
             throttle0Perc,
             avCornerDistance,
             throttleOscillation,
-            coastingPerc
+            coastingPerc,
+            brakeChanges,
+            avSpeedCornerDiff,
+            avApexThrottle,
         )
     )
-    print("Added lap data for lap: ",lapId)
 
-    result = {
+    return {
         "throttlePerc100": throttlePerc,
         "throttlePerc0": throttle0Perc,
         "avCornerBrakeDistance": avCornerDistance,
@@ -61,7 +63,5 @@ def calculatingData(currentLapData, lapId, cursor,session):
         "avApexThrottle": avApexThrottle,
         "throttleOscillation": throttleOscillation,
         "brakeChanges": brakeChanges,
-        "coastingPerc": coastingPerc,
+        "coastingPerc": coastingPerc
     }
-
-    return result

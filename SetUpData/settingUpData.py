@@ -12,90 +12,119 @@ from Functions.calculatingLapData import *
 from cleaningData import cleaningData
 
 # Connect to database
-database = sqlite3.connect(r"C:\\Users\\swavi\\Documents\\GitHub\\F1-Stop-Strategy\\Databases\\database.db")
+database = sqlite3.connect(
+    r"C:\\Users\\swavi\\Documents\\GitHub\\F1-Stop-Strategy\\Databases\\database.db"
+)
 cursor = database.cursor()
 
 fastf1.set_log_level("ERROR")
+
+cursor.executescript("""
+CREATE INDEX IF NOT EXISTS idx_race_year_circuit
+ON Race (year, circuit);
+
+CREATE INDEX IF NOT EXISTS idx_driver_code
+ON Driver (code);
+
+CREATE INDEX IF NOT EXISTS idx_lap_race_driver
+ON LAP (raceId, driverId);
+
+CREATE INDEX IF NOT EXISTS idx_lap_lapId
+ON LAP (lapId);
+
+CREATE INDEX IF NOT EXISTS idx_features_lapId
+ON Features (lapId);
+""")
+database.commit()
 
 
 def calculatingDriverLaps(year, raceNumber, track):
     session = getSession(year, raceNumber)
 
     cleaned = cleaningData(session)
-    driversLaps = cleaned['driversLaps']
-    driversData = cleaned['driversData']
-    drivers = cleaned['drivers']
-    lapMatrix = cleaned['lapMatrix']
+    driversLaps = cleaned["driversLaps"]
+    driversData = cleaned["driversData"]
+    drivers = cleaned["drivers"]
+    lapMatrix = cleaned["lapMatrix"]
 
     cursor.execute(
         """INSERT OR IGNORE INTO Race (year, circuit) VALUES (?, ?)""",
         (year, track)
     )
-    print("Added race to database")
-    database.commit()
     cursor.execute(
         """SELECT raceId FROM Race WHERE year = ? AND circuit = ?""",
         (year, track)
     )
-    raceId = cursor.lastrowid
+    raceId = cursor.fetchone()[0]
+
+    driverIdCache = {}
 
     cornerData = setUpCornerData(session)
 
     for driver, laps in driversLaps:
-        currentDriverData = driversData[driversData['Abbreviation'] == driver]
+        currentDriverData = driversData[
+            driversData["Abbreviation"] == driver
+        ]
 
         cursor.execute(
-            """INSERT OR IGNORE INTO Driver (code,name, team) VALUES (?, ?, ?)""",
+            """
+            INSERT OR IGNORE INTO Driver (code, name, team, teamColour)
+            VALUES (?, ?, ?, ?)
+            """,
             (
                 driver,
-                str(currentDriverData['FullName'].iloc[0]),
-                str(currentDriverData['TeamName'].iloc[0])
+                str(currentDriverData["FullName"].iloc[0]),
+                str(currentDriverData["TeamName"].iloc[0]),
+                str(currentDriverData["TeamColor"].iloc[0])
             )
         )
-        print("Added driver"+driver+" to database")
-        cursor.execute(
-          """SELECT driverId FROM Driver WHERE code = ?""",
-          (driver,)
-        )
-        driverId = cursor.fetchone()[0]
-        database.commit()
+
+        if driver not in driverIdCache:
+            cursor.execute(
+                """SELECT driverId FROM Driver WHERE code = ?""",
+                (driver,)
+            )
+            driverIdCache[driver] = cursor.fetchone()[0]
+
+        driverId = driverIdCache[driver]
 
         laps = laps.drop(
             [
-                'SpeedI1', 'SpeedI2', 'SpeedFL', 'SpeedST',
-                'Sector1SessionTime', 'Sector2SessionTime', 'Sector3SessionTime'
+                "SpeedI1", "SpeedI2", "SpeedFL", "SpeedST",
+                "Sector1SessionTime", "Sector2SessionTime", "Sector3SessionTime"
             ],
-            axis=1, errors='ignore'
+            axis=1,
+            errors="ignore"
         )
 
-        for i in range(laps.shape[0]):
-            lapRow = laps.iloc[i]
+        for _, lapRow in laps.iterrows():
             lapNumber = lapRow["LapNumber"]
 
             cursor.execute(
-                """INSERT INTO LAP (raceId, driverId, lapNumber, attacking, defending, clean)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (raceId, driverId, lapNumber, False, False, False)
+                """
+                INSERT INTO LAP (raceId, driverId, lapNumber, attacking, defending, clean)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (raceId, driverId, lapNumber, 0, 0, 0)
             )
-            print("Added in lap: ",raceId,driverId,lapNumber)
             lapId = cursor.lastrowid
-            database.commit()
 
-            lapTelemetry = lapRow.get_telemetry().drop(['Status', 'Z'], axis=1, errors='ignore')
-            lapTelemetry['X'] = lapTelemetry['X'] / 10
-            lapTelemetry['Y'] = lapTelemetry['Y'] / 10
+            lapTelemetry = (
+                lapRow.get_telemetry()
+                .drop(["Status", "Z"], axis=1, errors="ignore")
+            )
+            lapTelemetry["X"] /= 10
+            lapTelemetry["Y"] /= 10
             lapTelemetry = lapTelemetry.reset_index(drop=True)
+
             lapTelemetry = identifyCorner(lapTelemetry, cornerData)
             calculatingData(lapTelemetry, lapId, cursor, session)
-            defendingDrivers = getDefendingDrivers(lapTelemetry)
 
-            if defendingDrivers:
+            if defendingDrivers := getDefendingDrivers(lapTelemetry):
                 cursor.execute(
-                    """UPDATE LAP SET attacking=? WHERE driverId=? AND lapId=?""",
-                    (1, driverId, lapId)
+                    """UPDATE LAP SET attacking = 1 WHERE lapId = ?""",
+                    (lapId,)
                 )
-                print("Set attacking to true for: ",driverId,lapId)
-                database.commit()
 
                 lapMatrix.at[lapNumber, (driver, "defending")] = False
                 lapMatrix.at[lapNumber, (driver, "Drivers Ahead")] = defendingDrivers
@@ -103,6 +132,8 @@ def calculatingDriverLaps(year, raceNumber, track):
                 lapMatrix.at[lapNumber, (driver, "driverId")] = driverId
 
     identifyIfDefending(lapMatrix, drivers, session, cursor, database)
+
+    database.commit()
 
     lapMatrix = lapMatrix.copy()
 
